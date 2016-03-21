@@ -66,7 +66,7 @@ The generated NSEC record's type bitmap MUST have the RRSIG and NSEC bits set an
 
 For example, a request for the non-existing name a.example.com would cause the following NSEC record to be generated:
 
-    a.example.com. 3600 IN NSEC \000.a.example.com. ( RRSIG NSEC )
+	a.example.com. 3600 IN NSEC \000.a.example.com. ( RRSIG NSEC )
 
 The answer MUST have RCODE NOERROR, as opposed to NXDOMAIN, since a record matching the QNAME is being returned.
 
@@ -83,8 +83,7 @@ A server CAN decide to only turn NXDOMAIN into NODATA when the DO bit is set, so
 
 Never answering NXDOMAIN has the advantage that the server can drop empty non-terminal logic, as empty non-terminals would look the same as missing names. This again is useful for servers without a comprehensive view of the entire zone they are authoritative for.
 
-## Impact on DNS Query Minimization
-TBD
+Black lies effectively reverse the benefits of [@?I-D.ietf-dnsop-nxdomain-cut#01], unless a signaling system to distinguish black lies from empty non-terminals is agreed upon (TBD).
 
 # Security Considerations
 The Security Considerations from [@!RFC4470] on online signing apply.
