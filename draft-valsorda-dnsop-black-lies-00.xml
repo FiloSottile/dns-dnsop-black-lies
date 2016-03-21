@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE rfc SYSTEM 'rfc2629.dtd' []>
+<rfc ipr="trust200902" category="std" docName="draft-valsorda-dnsop-black-lies-00">
+<?rfc toc="yes"?>
+<?rfc symrefs="yes"?>
+<?rfc sortrefs="yes"?>
+<?rfc compact="yes"?>
+<?rfc subcompact="no"?>
+<?rfc private=""?>
+<?rfc topblock="yes"?>
+<?rfc comments="no"?>
+<front>
+<title abbrev="dns-dnsop-black-lies">Compact DNSSEC Denial of Existence or Black Lies</title>
+
+<author initials="F." surname="Valsorda" fullname="Filippo Valsorda">
+<organization>CloudFlare Inc.</organization>
+<address>
+<postal>
+<street>25 Lavington Street</street>
+<city>London</city>
+<code>SE1 0NZ</code>
+<country>UK</country>
+<region></region>
+</postal>
+<phone></phone>
+<email>filippo@cloudflare.com</email>
+<uri></uri>
+</address>
+</author>
+<author initials="O." surname="Gudmundsson" fullname="Olafur Gudmundsson">
+<organization>CloudFlare Inc.</organization>
+<address>
+<postal>
+<street>101 Townsend St.</street>
+<city>San Francisco</city>
+<code>94107</code>
+<country>USA</country>
+<region></region>
+</postal>
+<phone></phone>
+<email>olafur@cloudflare.com</email>
+<uri></uri>
+</address>
+</author>
+<date year="2016" month="March" day="21"/>
+
+<area>Internet</area>
+<workgroup></workgroup>
+<keyword>DNS</keyword>
+
+
+<abstract>
+<t>This document describes a technique to generate valid DNSSEC answers on demand for non-existing names by claiming the name exists and returning a NSEC record for it. These answers require only one NSEC record and allow live-signing servers to minimize signing operations, packet size, disclosure of zone contents and required knowledge of the zone layout.
+</t>
+</abstract>
+
+
+</front>
+
+<middle>
+
+<section anchor="introduction" title="Introduction">
+<t>Authenticated denial of existence went through several revisions <xref target="RFC4034"/> <xref target="RFC5155"/> <xref target="RFC7129"/> with NSEC and NSEC3 currently deployed in the wild. Both are designed to make offline signing possible, at a time at which there is no knowledge of what names will be queried. This leads to potentially unwanted disclosure of the zone contents. NSEC3 tries to mitigate the disclosure by hashing the names, but zone contents can still be recovered by a determined attacker.
+</t>
+<t>Servers capable of generating signatures on demand (online signing) instead have access to the name being queried when crafting the denial of existence and can therefore produce answers that leak zero information about the rest of the zone. Such a technique to be used with NSEC records is presented in <xref target="RFC4470"/> (&quot;Minimally Covering NSEC Records&quot;) and one to be used with NSEC3 is documented in <xref target="RFC7129"/>, Appendix B (&quot;NSEC3 White Lies&quot;).
+</t>
+<t>The &quot;Minimally Covering NSEC Records&quot; technique involves dynamically generating a NSEC record on a close predecessor and specifying a close successor as the next name. A NSEC covering the wildcard name must also be included, leading to two signed NSEC records (of which one might be cached).
+</t>
+<t>The &quot;NSEC3 White Lies&quot; technique involves dynamically generating a NSEC3 record on the hash of the QNAME minus one and specifying the hash of the QNAME plus one as the next name. NSEC3 matching the closest encloser and covering the wildcard must also be included, leading to three signed NSEC3 records (of which two might be cached).
+</t>
+<t>There is a second type of secure negative answer, as opposed to a NXDOMAIN: a NODATA, where the name queried for exists, but the type does not. Common clients exhibit similar behaviors Such an answer requires only one NSEC(3): the one with owner matching the QNAME, and no QTYPE in the bitmap.
+</t>
+<t>The technique in this document exploits this observation and improves on the efficiency of existing live-signing schemes, by answering NODATA in place of NXDOMAIN, saving 1 or 2 NSEC(3) and their signatures.
+</t>
+
+<section anchor="requirements" title="Requirements">
+<t>The key words &quot;MUST&quot;, &quot;MUST NOT&quot;, &quot;REQUIRED&quot;, &quot;SHALL&quot;, &quot;SHALL NOT&quot;, &quot;SHOULD&quot;, &quot;SHOULD NOT&quot;, &quot;RECOMMENDED&quot;, &quot;MAY&quot;, and &quot;OPTIONAL&quot; in this document are to be interpreted as described in <xref target="RFC2119"/>.
+</t>
+</section>
+</section>
+
+<section anchor="black-lies" title="Black Lies">
+<t>Whenever a request for a non-existing name in a signed zone the server would be authoritative for is received, a NSEC record is generated with owner name matching the QNAME.
+</t>
+<t>The next name SHOULD be set to the immediate lexicographic successor of the QNAME. Using a perfect epsilon function, such as the one in Section 3.1.2. of <xref target="RFC4471"/>, allows the server not to require knowledge of any other names in the zone, as no other names are covered by the proof. This is particularly useful for servers that don’t have or want a complete view of the zone, like signing middlemen or key-value database backed servers.
+</t>
+<t>The generated NSEC record's type bitmap MUST have the RRSIG and NSEC bits set and SHOULD NOT have any other bits set. This mirrors <xref target="RFC4470"/> style ephemeral NSEC records.
+</t>
+<t>For example, a request for the non-existing name a.example.com would cause the following NSEC record to be generated:
+</t>
+
+<figure align="center"><artwork align="center">
+a.example.com. 3600 IN NSEC \000.a.example.com. ( RRSIG NSEC )
+</artwork></figure>
+<t>The answer MUST have RCODE NOERROR, as opposed to NXDOMAIN, since a record matching the QNAME is being returned.
+</t>
+<t>Naturally, generated NSEC record MUST have corresponding RRSIGs generated.
+</t>
+<t>A black lie requires only one signing operation, generates a single NSEC+RRSIG pair (which can commonly fit with a SOA+RRSIG in &lt; 512 bytes), leaks no information on the rest of the zone and can be generated knowing nothing else than the fact that the QNAME does not exist.
+</t>
+</section>
+
+<section anchor="side-effects-of-sacrificing-the-nxdomain-rcode" title="Side Effects of Sacrificing the NXDOMAIN RCODE">
+<t>The main tradeoff of this technique is that NXDOMAIN answers are turned into NODATA, hiding the fact that the name does not exist. An intelligent client can recover part of this information by noticing the bitmap only carries ( RRSIG NSEC ), which indicates either a black lie or an empty non-terminal.
+</t>
+<t>Large scale empirical observations suggest that clients behave in the same way faced with NXDOMAIN or NODATA, as they are usually uninterested in the DNS topology of the zone, but are only after a specific QNAME+QTYPE pair.
+</t>
+<t>A server CAN decide to only turn NXDOMAIN into NODATA when the DO bit is set, so that older clients and clients interested in the topology of the zone for debugging purposes would still receive NXDOMAIN answers. This technique has been found not to cause any major issues in a large scale deployment. Otherwise, the server CAN decide to also turn NXDOMAIN into NODATA with DO=0 for consistency.
+</t>
+<t>Never answering NXDOMAIN has the advantage that the server can drop empty non-terminal logic, as empty non-terminals would look the same as missing names. This again is useful for servers without a comprehensive view of the entire zone they are authoritative for.
+</t>
+<t>Black lies effectively reverse the benefits of <xref target="I-D.ietf-dnsop-nxdomain-cut"/>, unless a signaling system to distinguish black lies from empty non-terminals is agreed upon (TBD).
+</t>
+</section>
+
+<section anchor="security-considerations" title="Security Considerations">
+<t>The Security Considerations from <xref target="RFC4470"/> on online signing apply.
+</t>
+</section>
+
+<section anchor="acknowledgements" title="Acknowledgements">
+<t>Dani Grant, Marek Majkowski, Vicky Shrestha, Nick Sullivan and Marek Vavrusa provided valuable comments.
+</t>
+</section>
+
+</middle>
+<back>
+<references title="Normative References">
+<?rfc include="http://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.4034.xml"?>
+<?rfc include="http://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.4470.xml"?>
+<?rfc include="http://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.4471.xml"?>
+<?rfc include="http://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.5155.xml"?>
+<?rfc include="http://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.7129.xml"?>
+</references>
+<references title="Informative References">
+<?rfc include="http://xml2rfc.ietf.org/public/rfc/bibxml3/reference.I-D.draft-ietf-dnsop-nxdomain-cut-01.xml"?>
+<?rfc include="http://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.2119.xml"?>
+</references>
+
+</back>
+</rfc>
