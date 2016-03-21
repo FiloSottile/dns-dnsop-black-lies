@@ -5,7 +5,7 @@ all: draft-valsorda-dnsop-black-lies-00.txt
 clean:
 	rm -f *.xml *.txt *.html
 
-%.xml: %.md
+%.xml: %
 	$(MMARK) -xml2 -page $< > $@
 %.txt: %.xml
 	$(XML2RFC) --text $<
